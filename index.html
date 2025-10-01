@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bounce & Collect</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            width: 90vw;
+            max-width: 800px;
+            height: 70vh;
+            max-height: 600px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            overflow: hidden;
+        }
+
+        .game-canvas {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+
+        .controls {
+            margin-top: 20px;
+            text-align: center;
+            color: white;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            border: none;
+            border-radius: 25px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .game-container {
+                width: 95vw;
+                height: 60vh;
+            }
+            
+            .ui-overlay {
+                font-size: 16px;
+            }
+            
+            .btn {
+                padding: 10px 20px;
+                font-size: 14px;
+            }
+        }
+
+        .particles {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas class="game-canvas" id="gameCanvas"></canvas>
+        <div class="ui-overlay">
+            <div>Punteggio: <span id="score">0</span></div>
+            <div>Vite: <span id="lives">3</span></div>
+            <div>Livello: <span id="level">1</span></div>
+        </div>
+        <div class="particles" id="particles"></div>
+        <div class="game-over" id="gameOver">
+            <h2>Game Over!</h2>
+            <p>Punteggio finale: <span id="finalScore">0</span></p>
+            <button class="btn" onclick="startGame()">Rigioca</button>
+        </div>
+    </div>
+
+    <div class="controls">
+        <p><strong>Controlli:</strong></p>
+        <p>🖱️ Computer: Muovi il mouse per controllare la pallina</p>
+        <p>📱 Telefono: Inclina il dispositivo o tocca lo schermo</p>
+        <div class="control-buttons">
+            <button class="btn" onclick="startGame()">Inizia Gioco</button>
+            <button class="btn" onclick="pauseGame()">Pausa</button>
+            <button class="btn" onclick="resetGame()">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const livesElement = document.getElementById('lives');
+        const levelElement = document.getElementById('level');
+        const gameOverElement = document.getElementById('gameOver');
+        const finalScoreElement = document.getElementById('finalScore');
+
+        // Imposta le dimensioni del canvas
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Variabili di gioco
+        let gameState = {
+            running: false,
+            paused: false,
+            score: 0,
+            lives: 3,
+            level: 1
+        };
+
+        // Pallina
+        let ball = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            vx: 0,
+            vy: 0,
+            radius: 15,
+            color: '#ff6b6b',
+            trail: []
+        };
+
+        // Ostacoli e oggetti da raccogliere
+        let obstacles = [];
+        let collectibles = [];
+        let particles = [];
+
+        // Input handling
+        let mouse = { x: 0, y: 0 };
+        let touch = { x: 0, y: 0 };
+        let deviceOrientation = { x: 0, y: 0 };
+
+        // Event listeners per mouse
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        // Event listeners per touch
+        canvas.addEventListener('touchstart', handleTouch, { passive: false });
+        canvas.addEventListener('touchmove', handleTouch, { passive: false });
+
+        function handleTouch(e) {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            mouse.x = touch.clientX - rect.left;
+            mouse.y = touch.clientY - rect.top;
+        }
+
+        // Device orientation per dispositivi mobili
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', (e) => {
+                deviceOrientation.x = e.gamma || 0; // left-right tilt
+                deviceOrientation.y = e.beta || 0;  // front-back tilt
+            });
+        }
+
+        // Funzioni di utilità
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        function distance(x1, y1, x2, y2) {
+            return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        }
+
+        // Crea ostacoli
+        function createObstacle() {
+            obstacles.push({
+                x: random(50, canvas.width - 50),
+                y: random(50, canvas.height - 50),
+                width: random(30, 80),
+                height: random(30, 80),
+                color: '#764ba2',
+                rotation: random(0, Math.PI * 2)
+            });
+        }
+
+        // Crea oggetti da raccogliere
+        function createCollectible() {
+            collectibles.push({
+                x: random(30, canvas.width - 30),
+                y: random(30, canvas.height - 30),
+                radius: 12,
+                color: '#4ecdc4',
+                pulse: 0,
+                collected: false
+            });
+        }
+
+        // Crea particelle
+        function createParticle(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: random(-3, 3),
+                    vy: random(-3, 3),
+                    life: 30,
+                    color: color,
+                    size: random(2, 6)
+                });
+            }
+        }
+
+        // Aggiorna la pallina
+        function updateBall() {
+            // Controllo con mouse/touch
+            let targetX = mouse.x;
+            let targetY = mouse.y;
+
+            // Se disponibile, usa l'orientamento del dispositivo
+            if (Math.abs(deviceOrientation.x) > 2 || Math.abs(deviceOrientation.y) > 2) {
+                targetX = ball.x + deviceOrientation.x * 3;
+                targetY = ball.y + deviceOrientation.y * 3;
+            }
+
+            // Calcola la forza verso il target
+            const dx = targetX - ball.x;
+            const dy = targetY - ball.y;
+            const force = 0.05;
+
+            ball.vx += dx * force;
+            ball.vy += dy * force;
+
+            // Applica attrito
+            ball.vx *= 0.9;
+            ball.vy *= 0.9;
+
+            // Aggiorna posizione
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // Rimbalzo sui bordi
+            if (ball.x - ball.radius < 0) {
+                ball.x = ball.radius;
+                ball.vx = -ball.vx * 0.8;
+            }
+            if (ball.x + ball.radius > canvas.width) {
+                ball.x = canvas.width - ball.radius;
+                ball.vx = -ball.vx * 0.8;
+            }
+            if (ball.y - ball.radius < 0) {
+                ball.y = ball.radius;
+                ball.vy = -ball.vy * 0.8;
+            }
+            if (ball.y + ball.radius > canvas.height) {
+                ball.y = canvas.height - ball.radius;
+                ball.vy = -ball.vy * 0.8;
+            }
+
+            // Aggiungi alla scia
+            ball.trail.push({ x: ball.x, y: ball.y });
+            if (ball.trail.length > 10) {
+                ball.trail.shift();
+            }
+        }
+
+        // Controlla collisioni
+        function checkCollisions() {
+            // Collisione con ostacoli
+            obstacles.forEach(obstacle => {
+                if (ball.x + ball.radius > obstacle.x &&
+                    ball.x - ball.radius < obstacle.x + obstacle.width &&
+                    ball.y + ball.radius > obstacle.y &&
+                    ball.y - ball.radius < obstacle.y + obstacle.height) {
+                    
+                    // Perdi una vita
+                    gameState.lives--;
+                    createParticle(ball.x, ball.y, '#ff6b6b');
+                    
+                    // Respingi la pallina
+                    const centerX = obstacle.x + obstacle.width / 2;
+                    const centerY = obstacle.y + obstacle.height / 2;
+                    const dx = ball.x - centerX;
+                    const dy = ball.y - centerY;
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    
+                    ball.vx = (dx / length) * 5;
+                    ball.vy = (dy / length) * 5;
+                    
+                    if (gameState.lives <= 0) {
+                        endGame();
+                    }
+                }
+            });
+
+            // Collisione con oggetti da raccogliere
+            collectibles.forEach((collectible, index) => {
+                if (!collectible.collected &&
+                    distance(ball.x, ball.y, collectible.x, collectible.y) < ball.radius + collectible.radius) {
+                    
+                    collectible.collected = true;
+                    gameState.score += 10;
+                    createParticle(collectible.x, collectible.y, '#4ecdc4');
+                    
+                    // Rimuovi l'oggetto raccolto
+                    collectibles.splice(index, 1);
+                }
+            });
+        }
+
+        // Aggiorna particelle
+        function updateParticles() {
+            particles.forEach((particle, index) => {
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                particle.size *= 0.98;
+                
+                if (particle.life <= 0 || particle.size < 0.5) {
+                    particles.splice(index, 1);
+                }
+            });
+        }
+
+        // Rendering
+        function render() {
+            // Pulisci canvas
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Disegna scia della pallina
+            ball.trail.forEach((point, index) => {
+                const alpha = index / ball.trail.length;
+                ctx.fillStyle = `rgba(255, 107, 107, ${alpha * 0.3})`;
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, ball.radius * alpha, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Disegna la pallina
+            const gradient = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, ball.radius);
+            gradient.addColorStop(0, '#ff8a8a');
+            gradient.addColorStop(1, '#ff6b6b');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Disegna ostacoli
+            obstacles.forEach(obstacle => {
+                ctx.save();
+                ctx.translate(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2);
+                ctx.rotate(obstacle.rotation);
+                
+                const gradient = ctx.createLinearGradient(-obstacle.width/2, -obstacle.height/2, obstacle.width/2, obstacle.height/2);
+                gradient.addColorStop(0, '#764ba2');
+                gradient.addColorStop(1, '#667eea');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(-obstacle.width/2, -obstacle.height/2, obstacle.width, obstacle.height);
+                ctx.restore();
+            });
+
+            // Disegna oggetti da raccogliere
+            collectibles.forEach(collectible => {
+                if (!collectible.collected) {
+                    collectible.pulse += 0.1;
+                    const pulseSize = collectible.radius + Math.sin(collectible.pulse) * 3;
+                    
+                    const gradient = ctx.createRadialGradient(collectible.x, collectible.y, 0, collectible.x, collectible.y, pulseSize);
+                    gradient.addColorStop(0, '#4ecdc4');
+                    gradient.addColorStop(1, 'rgba(78, 205, 196, 0.3)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(collectible.x, collectible.y, pulseSize, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // Disegna particelle
+            particles.forEach(particle => {
+                const alpha = particle.life / 30;
+                ctx.fillStyle = `rgba(${particle.color === '#ff6b6b' ? '255, 107, 107' : '78, 205, 196'}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // Game loop principale
+        function gameLoop() {
+            if (!gameState.running || gameState.paused) return;
+
+            updateBall();
+            checkCollisions();
+            updateParticles();
+            
+            // Aggiungi nuovi elementi periodicamente
+            if (Math.random() < 0.01 + gameState.level * 0.005) {
+                createObstacle();
+            }
+            if (Math.random() < 0.02) {
+                createCollectible();
+            }
+
+            // Aumenta livello
+            if (gameState.score > gameState.level * 100) {
+                gameState.level++;
+            }
+
+            // Aggiorna UI
+            scoreElement.textContent = gameState.score;
+            livesElement.textContent = gameState.lives;
+            levelElement.textContent = gameState.level;
+
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Funzioni di controllo del gioco
+        function startGame() {
+            gameState.running = true;
+            gameState.paused = false;
+            gameState.score = 0;
+            gameState.lives = 3;
+            gameState.level = 1;
+            
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height / 2;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.trail = [];
+            
+            obstacles = [];
+            collectibles = [];
+            particles = [];
+            
+            gameOverElement.style.display = 'none';
+            
+            // Crea alcuni elementi iniziali
+            for (let i = 0; i < 3; i++) {
+                createObstacle();
+                createCollectible();
+            }
+            
+            gameLoop();
+        }
+
+        function pauseGame() {
+            gameState.paused = !gameState.paused;
+            if (!gameState.paused && gameState.running) {
+                gameLoop();
+            }
+        }
+
+        function resetGame() {
+            gameState.running = false;
+            gameState.paused = false;
+            gameOverElement.style.display = 'none';
+        }
+
+        function endGame() {
+            gameState.running = false;
+            finalScoreElement.textContent = gameState.score;
+            gameOverElement.style.display = 'block';
+        }
+
+        // Inizializza il canvas
+        resizeCanvas();
+        
+        // Crea alcuni elementi iniziali per la demo
+        for (let i = 0; i < 3; i++) {
+            createObstacle();
+            createCollectible();
+        }
+        render();
+    </script>
+</body>
+</html>
